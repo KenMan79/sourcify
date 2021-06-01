@@ -190,9 +190,9 @@ export class Injector {
      */
     private async matchBytecodeToAddress(
         deploymentDatas: DeploymentData[],
-        compiledRuntimeBytecode: string,
-        compiledCreationBytecode: string,
+        recompiled: RecompilationResult
     ): Promise<Match[]> {
+        
         const matches: Match[] = [];
 
         for (const deploymentData of deploymentDatas) {
@@ -215,7 +215,7 @@ export class Injector {
             let compareResult;
             try {
                 compareResult = await this.compareBytecodes(
-                    deployedBytecode, creationData, compiledRuntimeBytecode, compiledCreationBytecode, chain, address
+                    deployedBytecode, creationData, recompiled, chain, address
                 );
             } catch (err) {
                 if (deploymentDatas.length === 1) {
@@ -258,34 +258,36 @@ export class Injector {
     private async compareBytecodes(
         deployedBytecode: string | null,
         creationData: string,
-        compiledRuntimeBytecode: string,
-        compiledCreationBytecode: string,
+        recompiled: RecompilationResult,
         chain: string,
         address: string
     ): Promise<CompareResult> {
 
         if (deployedBytecode && deployedBytecode.length > 2) {
-            if (deployedBytecode === compiledRuntimeBytecode) {
+            recompiled.deployedBytecode = this.addLibraryAddresses(recompiled.deployedBytecode, deployedBytecode);
+
+            if (deployedBytecode === recompiled.deployedBytecode) {
                 return { status: "perfect", encodedConstructorArgs: undefined };
             }
 
             const trimmedDeployedBytecode = trimMetadata(deployedBytecode);
-            const trimmedCompiledRuntimeBytecode = trimMetadata(compiledRuntimeBytecode);
+            const trimmedCompiledRuntimeBytecode = trimMetadata(recompiled.deployedBytecode);
             if (trimmedDeployedBytecode === trimmedCompiledRuntimeBytecode) {
                 return { status: "partial", encodedConstructorArgs: undefined };
             }
 
             if (trimmedDeployedBytecode.length === trimmedCompiledRuntimeBytecode.length) {
                 creationData = creationData || await this.getCreationData(chain, address);
+                recompiled.creationBytecode = this.addLibraryAddresses(recompiled.creationBytecode, creationData);
                 if (creationData) {
-                    if (creationData.startsWith(compiledCreationBytecode)) {
+                    if (creationData.startsWith(recompiled.creationBytecode)) {
                         // The reason why this uses `startsWith` instead of `===` is that
                         // creationData may contain constructor arguments at the end part.
-                        const encodedConstructorArgs = this.extractEncodedConstructorArgs(creationData, compiledCreationBytecode);
+                        const encodedConstructorArgs = this.extractEncodedConstructorArgs(creationData, recompiled.creationBytecode);
                         return { status: "perfect", encodedConstructorArgs };
                     }
 
-                    const trimmedCompiledCreationBytecode = trimMetadata(compiledCreationBytecode);
+                    const trimmedCompiledCreationBytecode = trimMetadata(recompiled.creationBytecode);
 
                     if (creationData.startsWith(trimmedCompiledCreationBytecode)) {
                         return { status: "partial", encodedConstructorArgs: undefined };
@@ -295,6 +297,19 @@ export class Injector {
         }
 
         return { status: null, encodedConstructorArgs: undefined };
+    }
+
+    private addLibraryAddresses(template: string, real: string): string {
+        const PLACEHOLDER_START = "__$";
+        const PLACEHOLDER_LENGTH = 40;
+
+        let index = template.indexOf(PLACEHOLDER_START);
+        for (; index !== -1; index = template.indexOf(PLACEHOLDER_START)) {
+            const placeholder = template.slice(index, index + PLACEHOLDER_LENGTH);
+            const address = real.slice(index, index + PLACEHOLDER_LENGTH);
+            template = template.replace(placeholder, address);
+        }
+        return template;
     }
 
     /**
@@ -378,8 +393,7 @@ export class Injector {
             const compareResult = await this.compareBytecodes(
                 inputData.bytecode,
                 inputData.creationData,
-                compilationResult.deployedBytecode,
-                compilationResult.bytecode,
+                compilationResult,
                 chain,
                 address
             );
@@ -394,7 +408,7 @@ export class Injector {
         // For other cases, we need to retrieve the code for specified address
         // from the chain.
         } else {
-            const fetchedDeploymentDatas = await this.fetchByBytecode(compilationResult.bytecode);
+            const fetchedDeploymentDatas = await this.fetchByBytecode(compilationResult.creationBytecode);
             const finalDeploymentDatas = [];
             for (const userDeploymentData of deploymentDatas) {
                 let shouldProcess = true;
@@ -412,7 +426,7 @@ export class Injector {
 
             for (const fetchedDeploymentData of fetchedDeploymentDatas) {
                 const encodedConstructorArgs = this.extractEncodedConstructorArgs(
-                    fetchedDeploymentData.creationData, compilationResult.bytecode
+                    fetchedDeploymentData.creationData, compilationResult.creationBytecode
                 );
 
                 matches.push({
@@ -425,8 +439,7 @@ export class Injector {
 
             const pendingMatches = await this.matchBytecodeToAddress(
                 finalDeploymentDatas,
-                compilationResult.deployedBytecode,
-                compilationResult.bytecode
+                compilationResult
             );
 
             matches = matches.concat(pendingMatches);
