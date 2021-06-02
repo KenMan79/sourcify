@@ -381,6 +381,24 @@ describe("Server", function() {
                 .attach("files", metadataBuffer)
                 .end((err, res) => assertions(err, res, done, address, "partial"));
         });
+
+        it("should verify a contract with library placeholders", done => {
+            const address = "0x399B23c75d8fd0b95E81E41e1c7c88937Ee18000";
+
+            const metadataPath = path.join("test", "sources", "metadata", "using-library.meta.object.json");
+            const metadataBuffer = fs.readFileSync(metadataPath);
+
+            const sourcePath = path.join("test", "sources", "contracts", "UsingLibrary.sol");
+            const sourceBuffer = fs.readFileSync(sourcePath);
+
+            chai.request(server.app)
+                .post("/")
+                .field("address", address)
+                .field("chain", "5")
+                .attach("files", metadataBuffer)
+                .attach("files", sourceBuffer)
+                .end((err, res) => assertions(err, res, done, address, "perfect"));
+        });
     });
 
     describe("verification v2", function() {
