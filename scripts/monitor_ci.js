@@ -13,6 +13,7 @@ const fetch = require('node-fetch');
 const util = require('util');
 const log = console.log;
 
+const chainID = "4";
 const artifact = require('../metacoin-source-verify/build/contracts/MetaCoin.json')
 const address = artifact.networks[chainID].address;
 
